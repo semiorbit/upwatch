@@ -1,0 +1,138 @@
+#!/bin/bash
+set -euo pipefail
+
+CONF="/etc/upload_scan.conf"
+JOURNAL="/var/log/upload_scan.journal.log"
+
+usage() {
+    echo "Usage:"
+    echo "  upwatch /full/path/to/project/web"
+    echo "  upwatch --stop /full/path/to/project/web"
+    echo "  upwatch --list"
+    echo "  upwatch --status /full/path/to/project/web"
+    echo "  upwatch --log"
+    echo "  upwatch --infected"
+    echo "  upwatch --clean"
+    echo "  upwatch --stats"
+    echo "  upwatch --tail"
+    echo "  upwatch --doctor"
+    exit 1
+}
+
+# Ensure core files exist
+touch "$CONF"
+chmod 640 "$CONF"
+chown root:root "$CONF"
+
+touch "$JOURNAL"
+chmod 600 "$JOURNAL"
+chown root:root "$JOURNAL"
+
+MODE="${1:-}"
+BASE="${2:-}"
+
+# ---------------- GLOBAL COMMANDS ----------------
+
+case "$MODE" in
+    --list)
+        [ ! -s "$CONF" ] && echo "No watched projects." && exit 0
+        echo "Watched upload logs:"
+        cat "$CONF"
+        exit 0
+        ;;
+    --log)
+        cat "$JOURNAL"
+        exit 0
+        ;;
+    --infected)
+        grep INFECTED "$JOURNAL" || echo "No infections recorded."
+        exit 0
+        ;;
+    --clean)
+        : > "$JOURNAL"
+        echo "✔ Journal cleared"
+        exit 0
+        ;;
+    --stats)
+        echo "Scan statistics:"
+        echo "----------------"
+        echo "Total scans:    $(wc -l < "$JOURNAL")"
+        echo "Infected:       $(grep -c INFECTED "$JOURNAL" || true)"
+        echo "Missing files:  $(grep -c MISSING "$JOURNAL" || true)"
+        exit 0
+        ;;
+    --tail)
+        tail -f "$JOURNAL"
+        exit 0
+        ;;
+    --doctor)
+        echo "Upwatch doctor:"
+        echo "---------------"
+        command -v /usr/sbin/maldet >/dev/null && echo "✔ maldet found" || echo "✖ maldet missing"
+        crontab -l | grep -q upload_scan.sh && echo "✔ cron active" || echo "✖ cron missing"
+        [ -r "$CONF" ] && echo "✔ conf readable" || echo "✖ conf unreadable"
+        [ -w "$JOURNAL" ] && echo "✔ journal writable" || echo "✖ journal not writable"
+        exit 0
+        ;;
+esac
+
+# ---------------- PROJECT COMMANDS ----------------
+
+[ -z "$MODE" ] && usage
+
+if [ "$MODE" = "--status" ]; then
+    [ -z "$BASE" ] && usage
+    LOGFILE="$BASE/var/log/uploads.log"
+
+    if grep -Fxq "$LOGFILE" "$CONF"; then
+        echo "✔ WATCHED"
+    else
+        echo "✖ NOT WATCHED"
+    fi
+
+    [ -f "$LOGFILE" ] && ls -l "$LOGFILE" || echo "uploads.log does not exist"
+    exit 0
+fi
+
+if [ "$MODE" = "--stop" ]; then
+    [ -z "$BASE" ] && usage
+    LOGDIR="$BASE/var/log"
+    LOGFILE="$LOGDIR/uploads.log"
+
+    if grep -Fxq "$LOGFILE" "$CONF"; then
+        sed -i "\|^$LOGFILE\$|d" "$CONF"
+        echo "✔ Removed from watch list"
+    else
+        echo "✔ Not in watch list"
+    fi
+
+    [ -f "$LOGFILE" ] && rm -f "$LOGFILE" && echo "✔ uploads.log deleted"
+    [ -d "$LOGDIR" ] && [ -z "$(ls -A "$LOGDIR")" ] && rmdir "$LOGDIR" && echo "✔ log dir removed"
+
+    echo "✔ Watch stopped for $BASE"
+    exit 0
+fi
+
+# ---------------- ADD (DEFAULT) ----------------
+
+BASE="$MODE"
+[ ! -d "$BASE" ] && echo "Error: $BASE is not a directory" && exit 1
+
+LOGDIR="$BASE/var/log"
+LOGFILE="$LOGDIR/uploads.log"
+USER="$(stat -c '%U' "$BASE")"
+
+mkdir -p "$LOGDIR"
+touch "$LOGFILE"
+
+chown root:"$USER" "$LOGFILE"
+chmod 660 "$LOGFILE"
+
+if ! grep -Fxq "$LOGFILE" "$CONF"; then
+    echo "$LOGFILE" >> "$CONF"
+    echo "✔ Registered $LOGFILE"
+else
+    echo "✔ Already registered"
+fi
+
+echo "✔ Upload watch prepared for $BASE"
