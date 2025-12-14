@@ -1,9 +1,14 @@
 #!/bin/bash
 set -euo pipefail
 
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
 CONF="/etc/upload_scan.conf"
 LOCK="/var/run/upload_scan.lock"
 JOURNAL="/var/log/upload_scan.journal.log"
+
+CLAMSCAN="/usr/bin/clamscan"
+CLAM_OPTS="--no-summary --infected"
 
 exec 9>"$LOCK"
 flock -n 9 || exit 0
@@ -19,18 +24,39 @@ while IFS= read -r LOG || [ -n "$LOG" ]; do
 
         TS="$(date '+%Y-%m-%d %H:%M:%S')"
 
+        # Allow only /home paths
+        case "$FILE" in
+            /home/*) ;;
+            *)
+                echo "$TS | $FILE | SKIPPED (OUTSIDE HOME)" >> "$JOURNAL"
+                sed -i '1d' "$LOG"
+                continue
+            ;;
+        esac
+
+        # Skip symlinks
+        if [ -L "$FILE" ]; then
+            echo "$TS | $FILE | SKIPPED (SYMLINK)" >> "$JOURNAL"
+            sed -i '1d' "$LOG"
+            continue
+        fi
+
         if [ ! -f "$FILE" ]; then
             echo "$TS | $FILE | MISSING" >> "$JOURNAL"
             sed -i '1d' "$LOG"
             continue
         fi
 
-        OUT="$(/usr/sbin/maldet -f "$FILE" --quarantine --clean --quiet 2>&1 || true)"
-
-        if echo "$OUT" | grep -qi "malware hits"; then
-            echo "$TS | $FILE | INFECTED" >> "$JOURNAL"
-        else
+        if "$CLAMSCAN" $CLAM_OPTS "$FILE" >/dev/null 2>&1; then
             echo "$TS | $FILE | OK" >> "$JOURNAL"
+        else
+            RC=$?
+            if [ "$RC" -eq 1 ]; then
+                rm -f -- "$FILE"
+                echo "$TS | $FILE | INFECTED (DELETED)" >> "$JOURNAL"
+            else
+                echo "$TS | $FILE | ERROR($RC)" >> "$JOURNAL"
+            fi
         fi
 
         sed -i '1d' "$LOG"

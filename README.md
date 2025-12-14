@@ -4,7 +4,7 @@
 shared hosting, VPS, and production servers.
 
 It provides a **safe, queue-based architecture** for scanning newly uploaded files
-using system-level malware scanners (Linux Malware Detect + ClamAV), without relying on
+using system-level malware scanners (Linux Anti-Malware **ClamAV**), without relying on
 inotify, PHP shell execution, or filesystem guessing.
 
 UpWatch is built to be:
@@ -95,10 +95,12 @@ This provides:
 
 ### Requirements
 
+# INSTALL ClamAV/CLAMSCAN FIRST
+
 - Linux (Rocky Linux / RHEL / AlmaLinux compatible)
 - root access
-- Linux Malware Detect (`maldet`)
-- ClamAV installed and working
+- Linux anti-malware ClamAV (`clamscan`)
+- **ClamAV** installed and working [**clamscan** should be tested]
 - cron enabled
 
 ---
@@ -248,4 +250,4 @@ composer require semiorbit/upwatch
 ## License
 
 MIT License  
-© Semiorbit
+2026 © Semiorbit Solutions
